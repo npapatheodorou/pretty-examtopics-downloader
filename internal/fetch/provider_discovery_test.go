@@ -281,3 +281,64 @@ func TestNormalizeDiscussionViewHref(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildProviderExamSlugsOfficialOnly(t *testing.T) {
+	official := []string{
+		"/exams/oracle/1z0-1042-20/",
+		"/exams/oracle/1z0-1042-23/",
+		"/exams/oracle/1z0-1106-1/",
+	}
+
+	got := buildProviderExamSlugs("oracle", official, []string{"1z0-9999-1"}, false)
+	want := []string{"1z0-1042", "1z0-1106"}
+
+	if len(got) != len(want) {
+		t.Fatalf("expected %d exams, got %d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected exam at index %d: want %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
+func TestBuildProviderExamSlugsIncludesDiscussionVariantsWhenEnabled(t *testing.T) {
+	official := []string{
+		"/exams/microsoft/az-900/",
+	}
+	inferred := []string{
+		"az-104",
+		"az-900",
+	}
+
+	got := buildProviderExamSlugs("microsoft", official, inferred, true)
+	want := []string{"az-104", "az-900"}
+
+	if len(got) != len(want) {
+		t.Fatalf("expected %d exams, got %d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected exam at index %d: want %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
+func TestBuildProviderExamSlugsReturnsFallbackOnlyWhenDiscussionsEnabled(t *testing.T) {
+	got := buildProviderExamSlugs("microsoft", nil, nil, true)
+	want := []string{"all-discussions"}
+
+	if len(got) != len(want) {
+		t.Fatalf("expected %d exams, got %d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected exam at index %d: want %q, got %q", i, want[i], got[i])
+		}
+	}
+
+	got = buildProviderExamSlugs("microsoft", nil, nil, false)
+	if len(got) != 0 {
+		t.Fatalf("expected no exams when discussions are disabled, got %v", got)
+	}
+}

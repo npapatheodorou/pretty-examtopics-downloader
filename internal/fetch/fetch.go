@@ -372,7 +372,24 @@ func GetProviderExams(providerName string) []string {
 	return allExams
 }
 
-func GetProviderExamSlugs(providerName string) []string {
+func GetProviderExamSlugs(providerName string, includeDiscussionExams bool) []string {
+	providerName = strings.TrimSpace(strings.ToLower(providerName))
+	if providerName == "" {
+		return nil
+	}
+
+	officialExamLinks := GetProviderExams(providerName)
+	var inferredFromDiscussions []string
+	if includeDiscussionExams {
+		// Smart fallback strategy for providers missing /exams/ coverage:
+		// infer distinct exam slugs from provider discussion links.
+		inferredFromDiscussions = inferExamSlugsFromDiscussionPages(providerName)
+	}
+
+	return buildProviderExamSlugs(providerName, officialExamLinks, inferredFromDiscussions, includeDiscussionExams)
+}
+
+func buildProviderExamSlugs(providerName string, officialExamLinks, inferredFromDiscussions []string, includeDiscussionExams bool) []string {
 	providerName = strings.TrimSpace(strings.ToLower(providerName))
 	if providerName == "" {
 		return nil
@@ -392,23 +409,24 @@ func GetProviderExamSlugs(providerName string) []string {
 		examSlugs = append(examSlugs, normalized)
 	}
 
-	officialExamLinks := GetProviderExams(providerName)
 	officialExamSlugs := extractExamSlugsFromExamLinks(providerName, officialExamLinks)
 	for _, exam := range officialExamSlugs {
 		add(exam)
 	}
 
-	// Smart fallback strategy for providers missing /exams/ coverage:
-	// infer distinct exam slugs from provider discussion links.
-	inferredFromDiscussions := inferExamSlugsFromDiscussionPages(providerName)
-	for _, exam := range inferredFromDiscussions {
-		add(exam)
+	if includeDiscussionExams {
+		for _, exam := range inferredFromDiscussions {
+			add(exam)
+		}
 	}
 
 	sort.Strings(examSlugs)
 	if len(examSlugs) == 0 {
-		// last-resort fallback to still ingest provider content
-		return []string{"all-discussions"}
+		if includeDiscussionExams {
+			// last-resort fallback to still ingest provider content
+			return []string{"all-discussions"}
+		}
+		return nil
 	}
 
 	return examSlugs

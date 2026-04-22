@@ -62,10 +62,21 @@ func run() error {
 		return fmt.Errorf("failed reading provider selection: %w", err)
 	}
 
+	includeDiscussionExamDiscovery, err := promptYesNo(
+		reader,
+		fmt.Sprintf("Include discussion pages while discovering exams for %s? [y/N]: ", formatProviderName(selectedProvider)),
+		false,
+	)
+	if err != nil {
+		return fmt.Errorf("failed reading exam discovery mode: %w", err)
+	}
+
 	selectedExam, err := promptSelectionWithRefresh(
 		reader,
 		fmt.Sprintf("Available Exams for %s", formatProviderName(selectedProvider)),
-		func() []string { return getProviderExamSlugsWithStatus(selectedProvider) },
+		func() []string {
+			return getProviderExamSlugsWithStatus(selectedProvider, includeDiscussionExamDiscovery)
+		},
 		func(s string) string {
 			if s == "all-discussions" {
 				return "all-discussions (fallback)"
@@ -74,6 +85,9 @@ func run() error {
 		},
 	)
 	if err != nil {
+		if !includeDiscussionExamDiscovery && strings.Contains(strings.ToLower(err.Error()), "no options found") {
+			return fmt.Errorf("no official exams were found for %s. Run again and answer 'y' to include discussion pages", formatProviderName(selectedProvider))
+		}
 		return fmt.Errorf("failed reading exam selection: %w", err)
 	}
 	extractionFilter := selectedExam
@@ -154,10 +168,14 @@ func getProvidersWithStatus() []string {
 	return providers
 }
 
-func getProviderExamSlugsWithStatus(provider string) []string {
+func getProviderExamSlugsWithStatus(provider string, includeDiscussionExamDiscovery bool) []string {
 	providerLabel := formatProviderName(provider)
 	printSection(fmt.Sprintf("Exam Discovery: %s", providerLabel))
-	fmt.Println(style("Scanning available exams (including discussion-derived variants).", ansiGray))
+	if includeDiscussionExamDiscovery {
+		fmt.Println(style("Scanning available exams (including discussion-derived variants).", ansiGray))
+	} else {
+		fmt.Println(style("Scanning available exams from the official provider exam list only.", ansiGray))
+	}
 
 	done := make(chan struct{})
 	start := time.Now()
@@ -168,8 +186,11 @@ func getProviderExamSlugsWithStatus(provider string) []string {
 
 		status := []string{
 			"Still working: checking available exam names...",
-			"Still working: this provider has many discussion pages to review.",
+			"Still working: loading the provider exam list...",
 			"Still working: organizing the exam list for you.",
+		}
+		if includeDiscussionExamDiscovery {
+			status[1] = "Still working: this provider has many discussion pages to review."
 		}
 		step := 0
 
@@ -187,13 +208,38 @@ func getProviderExamSlugsWithStatus(provider string) []string {
 		}
 	}()
 
-	examSlugs := fetch.GetProviderExamSlugs(provider)
+	examSlugs := fetch.GetProviderExamSlugs(provider, includeDiscussionExamDiscovery)
 	close(done)
 
 	elapsed := time.Since(start).Round(time.Second)
 	printSuccessf("Done. Found %d exam option(s) for %s in %s.\n", len(examSlugs), providerLabel, elapsed)
 
 	return examSlugs
+}
+
+func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) (bool, error) {
+	for {
+		fmt.Print(style(prompt, ansiBold+ansiCyan))
+
+		raw, err := reader.ReadString('\n')
+		if err != nil {
+			return false, err
+		}
+
+		answer := strings.ToLower(strings.TrimSpace(raw))
+		if answer == "" {
+			return defaultYes, nil
+		}
+
+		switch answer {
+		case "y", "yes":
+			return true, nil
+		case "n", "no":
+			return false, nil
+		default:
+			printWarnf("Please answer y or n.\n")
+		}
+	}
 }
 
 func promptSelectionWithRefresh(
