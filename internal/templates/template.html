@@ -319,7 +319,45 @@
       padding: 0 2px;
     }
 
-    .q-status { font-size: 14px; flex-shrink: 0; }
+    .q-status {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 14px;
+      line-height: 1;
+      border: 1px solid transparent;
+      background: rgba(255,255,255,0.04);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+      opacity: 0;
+      transform: scale(0.92);
+      transition: opacity 0.22s ease, transform 0.22s ease, background 0.22s ease, border-color 0.22s ease;
+      pointer-events: none;
+    }
+
+    .q-status.has-state {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .q-status[data-state="correct"] {
+      background: rgba(34,197,94,0.16);
+      border-color: rgba(74,222,128,0.28);
+    }
+
+    .q-status[data-state="wrong"] {
+      background: rgba(239,68,68,0.16);
+      border-color: rgba(248,113,113,0.28);
+    }
+
+    .q-status[data-state="peek"] {
+      background: rgba(59,130,246,0.16);
+      border-color: rgba(96,165,250,0.28);
+    }
+
     .q-toggle { font-size: 10px; color: #666; transition: transform 0.3s; flex-shrink: 0; }
     .q-card.open .q-toggle { transform: rotate(180deg); }
 
@@ -1090,6 +1128,33 @@
       return a.every((item) => setB.has(item));
     }
 
+    function setQuestionStatus(qid, nextState) {
+      const status = document.getElementById(`${qid}-status`);
+      if (!status) return;
+
+      const states = {
+        correct: { icon: "✅", label: "Correct" },
+        wrong: { icon: "❌", label: "Incorrect" },
+        peek: { icon: "👀", label: "Peeked answer" }
+      };
+
+      const meta = states[nextState];
+      if (!meta) {
+        status.textContent = "";
+        status.classList.remove("has-state");
+        status.removeAttribute("data-state");
+        status.removeAttribute("title");
+        status.removeAttribute("aria-label");
+        return;
+      }
+
+      status.textContent = meta.icon;
+      status.classList.add("has-state");
+      status.dataset.state = nextState;
+      status.title = meta.label;
+      status.setAttribute("aria-label", meta.label);
+    }
+
     function pick(el, qid) {
       if (state[qid]?.answered) return;
 
@@ -1129,7 +1194,6 @@
 
       document.querySelectorAll(`#${qid}-opts .opt`).forEach((o) => o.classList.add("disabled"));
       const res = document.getElementById(`${qid}-result`);
-      const status = document.getElementById(`${qid}-status`);
       const correctSet = new Set(correctAnswers);
       const selectedSet = new Set(selectedAnswers);
       const answersText = correctAnswers.join(", ");
@@ -1150,13 +1214,13 @@
           correctAnswers.length > 1
             ? `Correct! Answers: <strong>${answersText}</strong>`
             : "Correct!";
-        status.textContent = "OK";
+        setQuestionStatus(qid, "correct");
         totalCorrect++;
         state[qid].wasCorrect = true;
       } else {
         res.className = "result-bar show is-wrong";
         res.innerHTML = `Wrong - answer${correctAnswers.length > 1 ? "s are" : " is"} <strong>${answersText}</strong>`;
-        status.textContent = "X";
+        setQuestionStatus(qid, "wrong");
         state[qid].wasCorrect = false;
       }
 
@@ -1187,7 +1251,7 @@
       res.className = "result-bar show is-cheat";
       res.innerHTML = `Answer${correctAnswers.length > 1 ? "s" : ""}: <strong>${answersText}</strong>`;
 
-      document.getElementById(`${qid}-status`).textContent = "peek";
+      setQuestionStatus(qid, "peek");
       state[qid].wasCorrect = false;
       showPost(qid, card.dataset.link);
     }
@@ -1218,7 +1282,7 @@
 
       document.getElementById(`${qid}-result`).className = "result-bar";
       document.getElementById(`${qid}-result`).innerHTML = "";
-      document.getElementById(`${qid}-status`).textContent = "";
+      setQuestionStatus(qid, "");
 
       document.getElementById(`${qid}-submit`).classList.remove("hidden");
       document.getElementById(`${qid}-submit`).disabled = true;
