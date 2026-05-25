@@ -48,6 +48,8 @@ var (
 	answerCompactPattern   = regexp.MustCompile(`(?i)\b([A-F]{2,6})\b`)
 	optionDotPattern       = regexp.MustCompile(`(?m)^\s*([A-Fa-f])\s*[\.)]\s*(.+?)\s*$`)
 	optionColonPattern     = regexp.MustCompile(`(?m)^\s*([A-Fa-f])\s*:\s*(.+?)\s*$`)
+	imageMarkerPattern     = regexp.MustCompile(`\[\[IMG:([^\]]+)\]\]`)
+	descURLPattern         = regexp.MustCompile(`https?://[^\s"'<>\]]+`)
 	urlPattern             = regexp.MustCompile(`https?://[^\s"'<>]+`)
 	imageURLPattern        = regexp.MustCompile(`(?i)^https?://[^\s"'<>]+(\.(png|jpg|jpeg|gif|webp|bmp|svg))?(\?[^\s"'<>]*)?$`)
 	invalidCharsPattern    = regexp.MustCompile(`[^a-z0-9._-]+`)
@@ -432,28 +434,58 @@ func indentBlock(content, indent string) string {
 func buildQuestionCards(dataList []models.QuestionData, includeComments bool) string {
 	var b strings.Builder
 	questionNumber := 0
+	droppedEmpty := 0
+	renderedWithoutOptions := 0
 
 	for _, data := range dataList {
 		options := parseOptions(data.Questions)
+
 		if len(options) == 0 {
-			continue
+			// Only drop when the entire question record is empty — otherwise
+			// render it so image-only questions or pages with markup drift
+			// still reach the output instead of silently disappearing.
+			if !questionHasAnyContent(data) {
+				droppedEmpty++
+				continue
+			}
+			renderedWithoutOptions++
 		}
 
 		questionNumber++
 		qid := fmt.Sprintf("q%d", questionNumber)
 		isOpen := questionNumber == 1
 
-		correctAnswers := extractCorrectAnswers(data.Answer, options)
-		correct := strings.Join(correctAnswers, ",")
+		// Prefer the canonical Solution.Letter (from /view/) when available —
+		// it's authoritative, whereas the discussion-page answer is a
+		// best-effort guess.
+		answerSource := data.Answer
+		if data.Solution != nil && strings.TrimSpace(data.Solution.Letter) != "" {
+			answerSource = data.Solution.Letter
+		}
+		// Skip the default "A" extractCorrectAnswers fallback for HOTSPOT /
+		// image-only questions: there are no letter options and no letter
+		// answer to commit to. data-correct stays empty so the interactive
+		// UI doesn't claim a bogus correct option.
+		correct := ""
+		if len(options) > 0 || strings.TrimSpace(answerSource) != "" {
+			correct = strings.Join(extractCorrectAnswers(answerSource, options), ",")
+		}
 		link := htmlpkg.EscapeString(strings.TrimSpace(data.QuestionLink))
 		commentsJSON := buildCommentsJSON(data.Comments, includeComments)
 
-		questionText, previewText, exhibitURLs := buildQuestionTextAndPreview(data)
+		questionText, previewText, exhibitURLs, answerExhibitURLs := buildQuestionTextAndPreview(data)
 
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString(renderQuestionCard(qid, questionNumber, isOpen, correct, link, commentsJSON, questionText, previewText, exhibitURLs, options))
+		b.WriteString(renderQuestionCard(qid, questionNumber, isOpen, correct, link, commentsJSON, questionText, previewText, exhibitURLs, answerExhibitURLs, data.Solution, options))
+	}
+
+	if droppedEmpty > 0 {
+		fmt.Fprintf(os.Stderr, "[WARN] Dropped %d question(s) with no content (no text, options, or exhibits).\n", droppedEmpty)
+	}
+	if renderedWithoutOptions > 0 {
+		fmt.Fprintf(os.Stderr, "[INFO] Rendered %d question(s) without parseable options (image-only or unrecognised markup).\n", renderedWithoutOptions)
 	}
 
 	if b.Len() == 0 {
@@ -461,6 +493,30 @@ func buildQuestionCards(dataList []models.QuestionData, includeComments bool) st
 	}
 
 	return strings.TrimSpace(b.String())
+}
+
+func questionHasAnyContent(data models.QuestionData) bool {
+	if strings.TrimSpace(data.Content) != "" {
+		return true
+	}
+	if strings.TrimSpace(data.Header) != "" {
+		return true
+	}
+	if strings.TrimSpace(data.Title) != "" {
+		return true
+	}
+	if len(data.ExhibitURLs) > 0 {
+		return true
+	}
+	if len(data.AnswerExhibitURLs) > 0 {
+		return true
+	}
+	for _, q := range data.Questions {
+		if strings.TrimSpace(q) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func renderQuestionCard(
@@ -473,6 +529,8 @@ func renderQuestionCard(
 	questionText string,
 	previewText string,
 	exhibitURLs []string,
+	answerExhibitURLs []string,
+	solution *models.AnswerSolution,
 	options []answerOption,
 ) string {
 	var b strings.Builder
@@ -514,12 +572,32 @@ func renderQuestionCard(
 	fmt.Fprintf(&b, "        <div class=\"q-text\" id=\"%s-text\">%s</div>\n", qid, questionText)
 
 	fmt.Fprintf(&b, "        <div class=\"opts\" id=\"%s-opts\">\n", qid)
+	switch {
+	case len(options) == 0 && solution != nil:
+		// HOTSPOT-style canonical answer from /exams/{provider}/{slug}/view/.
+		// The Hot Area image from the question body is intentionally NOT shown
+		// as the answer here — it's the user-interaction area, not the result.
+		renderCanonicalAnswerBlock(&b, solution)
+	case len(options) == 0 && len(answerExhibitURLs) > 0:
+		// No canonical solution available (typically because the question is
+		// beyond ExamTopics' freely-exposed quota on /view/). Fall back to
+		// the Hot Area image from the question body, but label it clearly
+		// as the interaction area — NOT the verified answer.
+		renderHotAreaFallbackBlock(&b, answerExhibitURLs)
+	case len(options) == 0:
+		b.WriteString("            <div class=\"opt-empty\">No selectable answer options were extracted for this question. See the exhibit or question text above; the original discussion is linked at the bottom.</div>\n")
+	}
 	for _, option := range options {
 		letter := htmlpkg.EscapeString(option.Letter)
-		text := htmlpkg.EscapeString(option.Text)
+		cleanText, imageURLs := splitImageMarkers(option.Text)
+		text := htmlpkg.EscapeString(cleanText)
 		fmt.Fprintf(&b, "            <div class=\"opt\" data-val=\"%s\" onclick=\"pick(this,'%s')\">\n", letter, qid)
 		fmt.Fprintf(&b, "                <div class=\"opt-letter\">%s</div>\n", letter)
 		fmt.Fprintf(&b, "                <div class=\"opt-text\" data-original=\"%s\">%s</div>\n", text, text)
+		for _, imgURL := range imageURLs {
+			escaped := htmlpkg.EscapeString(imgURL)
+			fmt.Fprintf(&b, "                <img class=\"opt-image\" src=\"%s\" alt=\"Option %s\" onerror=\"this.style.display='none'\" onclick=\"event.stopPropagation();zoomImage(this.src)\">\n", escaped, letter)
+		}
 		b.WriteString("            </div>\n")
 	}
 	b.WriteString("        </div>\n")
@@ -538,8 +616,9 @@ func renderQuestionCard(
 	return b.String()
 }
 
-func buildQuestionTextAndPreview(data models.QuestionData) (string, string, []string) {
-	exhibitURLs := extractExhibitURLs(data)
+func buildQuestionTextAndPreview(data models.QuestionData) (string, string, []string, []string) {
+	answerExhibitURLs := extractAnswerExhibitURLs(data)
+	exhibitURLs := extractQuestionExhibitURLs(data, answerExhibitURLs)
 
 	content := removeSuggestedAnswerText(cleanQuestionText(stripImageURLs(data.Content)))
 	header := removeSuggestedAnswerText(cleanQuestionText(stripImageURLs(data.Header)))
@@ -566,7 +645,7 @@ func buildQuestionTextAndPreview(data models.QuestionData) (string, string, []st
 	preview := truncatePreview(body, 95)
 	formattedBody := formatHTMLText(body)
 
-	return formattedBody, htmlpkg.EscapeString(preview), exhibitURLs
+	return formattedBody, htmlpkg.EscapeString(preview), exhibitURLs, answerExhibitURLs
 }
 
 func cleanQuestionText(text string) string {
@@ -623,8 +702,48 @@ func stripImageURLs(text string) string {
 	return text
 }
 
-func extractExhibitURLs(data models.QuestionData) []string {
+// extractAnswerExhibitURLs returns the answer-side image URLs only, applying
+// the same dedup/validation rules as question-side exhibits. Used to render
+// the dedicated answer-block for HOTSPOT/DRAG-DROP questions.
+func extractAnswerExhibitURLs(data models.QuestionData) []string {
 	seen := map[string]struct{}{}
+	out := make([]string, 0, len(data.AnswerExhibitURLs))
+
+	add := func(rawURL string) {
+		candidate := trimTrailingPunctuation(strings.TrimSpace(rawURL))
+		if candidate == "" {
+			return
+		}
+		if !isLikelyImageURL(candidate) {
+			return
+		}
+		if _, exists := seen[candidate]; exists {
+			return
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+
+	for _, url := range data.AnswerExhibitURLs {
+		add(url)
+	}
+	return out
+}
+
+// extractQuestionExhibitURLs returns the question-side image URLs, taking
+// AnswerExhibitURLs into account so the same URL is never rendered both as a
+// question exhibit and as an answer exhibit. URL fallbacks scraped out of the
+// question text are also subtracted against the answer set.
+func extractQuestionExhibitURLs(data models.QuestionData, answerURLs []string) []string {
+	seen := map[string]struct{}{}
+	// Pre-seed with answer URLs so the URL-from-text fallback can't re-add
+	// them on the question side.
+	for _, u := range answerURLs {
+		candidate := trimTrailingPunctuation(strings.TrimSpace(u))
+		if candidate != "" {
+			seen[candidate] = struct{}{}
+		}
+	}
 	out := make([]string, 0, 2)
 
 	add := func(rawURL string) {
@@ -655,8 +774,166 @@ func extractExhibitURLs(data models.QuestionData) []string {
 	return out
 }
 
+// extractExhibitURLs is kept for backward compatibility with callers/tests
+// that don't differentiate question and answer images.
+func extractExhibitURLs(data models.QuestionData) []string {
+	answer := extractAnswerExhibitURLs(data)
+	q := extractQuestionExhibitURLs(data, answer)
+	if len(answer) == 0 {
+		return q
+	}
+	out := make([]string, 0, len(q)+len(answer))
+	out = append(out, q...)
+	out = append(out, answer...)
+	return out
+}
+
 func trimTrailingPunctuation(input string) string {
 	return strings.TrimRight(input, ".,;)")
+}
+
+// renderCanonicalAnswerBlock writes the authoritative "Reveal Solution"
+// content (scraped from /exams/.../view/) into the answer slot of a question
+// card. It surfaces the correct letter/image, an explanation paragraph with
+// inline images, and a tidied references list.
+func renderCanonicalAnswerBlock(b *strings.Builder, sol *models.AnswerSolution) {
+	b.WriteString("            <div class=\"answer-block answer-block-canonical\">\n")
+	b.WriteString("                <h4 class=\"answer-block-title\">Correct Answer</h4>\n")
+
+	if letter := strings.TrimSpace(sol.Letter); letter != "" {
+		fmt.Fprintf(b, "                <div class=\"answer-letter\">%s</div>\n", htmlpkg.EscapeString(letter))
+	}
+
+	// Inline image(s) that sit directly inside .correct-answer (HOTSPOT case).
+	for _, imgURL := range sol.Images {
+		escaped := htmlpkg.EscapeString(imgURL)
+		b.WriteString("                <div class=\"answer-exhibit\">\n")
+		fmt.Fprintf(b, "                    <img src=\"%s\" alt=\"Correct answer\"\n", escaped)
+		b.WriteString("                         onerror=\"this.parentElement.style.display='none'\"\n")
+		b.WriteString("                         onclick=\"zoomImage(this.src)\">\n")
+		b.WriteString("                    <button class=\"q-exhibit-zoom\" onclick=\"zoomImage(this.parentElement.querySelector('img').src)\" title=\"Zoom image\">+</button>\n")
+		b.WriteString("                </div>\n")
+	}
+
+	// Description (explanation paragraphs with interleaved images).
+	if strings.TrimSpace(sol.Description) != "" {
+		b.WriteString("                <div class=\"answer-description\">")
+		b.WriteString(renderAnswerDescriptionHTML(sol.Description))
+		b.WriteString("</div>\n")
+	}
+
+	// References extracted from the description text (links the user can
+	// click to read the underlying documentation).
+	if len(sol.References) > 0 {
+		b.WriteString("                <div class=\"answer-references\">\n")
+		b.WriteString("                    <strong>References:</strong>\n")
+		b.WriteString("                    <ul>\n")
+		for _, ref := range sol.References {
+			esc := htmlpkg.EscapeString(ref)
+			fmt.Fprintf(b, "                        <li><a href=\"%s\" target=\"_blank\" rel=\"noopener\">%s</a></li>\n", esc, esc)
+		}
+		b.WriteString("                    </ul>\n")
+		b.WriteString("                </div>\n")
+	}
+
+	b.WriteString("            </div>\n")
+}
+
+// renderHotAreaFallbackBlock surfaces the question's own Hot Area / answer-area
+// image when no canonical solution is available. The label is intentionally
+// "Answer Area" rather than "Answer" so users understand this is the
+// interaction surface from the question itself, not a verified answer.
+func renderHotAreaFallbackBlock(b *strings.Builder, answerExhibitURLs []string) {
+	b.WriteString("            <div class=\"answer-block answer-block-fallback\">\n")
+	b.WriteString("                <h4 class=\"answer-block-title\">Answer Area (unverified)</h4>\n")
+	b.WriteString("                <p class=\"answer-block-note\">Canonical solution not freely available from ExamTopics. The image below is the question's own interaction area; cross-check with the community discussion linked at the bottom.</p>\n")
+	for idx, answerURL := range answerExhibitURLs {
+		label := "Answer Area"
+		if len(answerExhibitURLs) > 1 {
+			label = fmt.Sprintf("Answer Area %d", idx+1)
+		}
+		escaped := htmlpkg.EscapeString(answerURL)
+		b.WriteString("                <div class=\"answer-exhibit\">\n")
+		fmt.Fprintf(b, "                    <img src=\"%s\" alt=\"%s\"\n", escaped, htmlpkg.EscapeString(label))
+		b.WriteString("                         onerror=\"this.parentElement.style.display='none'\"\n")
+		b.WriteString("                         onclick=\"zoomImage(this.src)\">\n")
+		b.WriteString("                    <button class=\"q-exhibit-zoom\" onclick=\"zoomImage(this.parentElement.querySelector('img').src)\" title=\"Zoom image\">+</button>\n")
+		b.WriteString("                </div>\n")
+	}
+	b.WriteString("            </div>\n")
+}
+
+// renderAnswerDescriptionHTML produces the inner HTML for the answer
+// description paragraph. Input text is plain (output of serializeAnswerDescription):
+//   - "\n" denotes a line break (rendered as <br>)
+//   - "[[IMG:<url>]]" denotes an inline image
+//   - http(s) URLs are rendered as clickable links
+// Everything else is HTML-escaped.
+func renderAnswerDescriptionHTML(text string) string {
+	if text == "" {
+		return ""
+	}
+	parts := imageMarkerPattern.Split(text, -1)
+	markers := imageMarkerPattern.FindAllStringSubmatch(text, -1)
+
+	var b strings.Builder
+	for i, segment := range parts {
+		b.WriteString(formatAnswerDescriptionSegment(segment))
+		if i < len(markers) {
+			esc := htmlpkg.EscapeString(strings.TrimSpace(markers[i][1]))
+			fmt.Fprintf(&b, `<img class="answer-desc-image" src="%s" alt="" onerror="this.style.display='none'" onclick="zoomImage(this.src)">`, esc)
+		}
+	}
+	return b.String()
+}
+
+// formatAnswerDescriptionSegment HTML-escapes a text fragment, turns http(s)
+// URLs into <a> tags, and converts "\n" to "<br>". URLs are sentinel-replaced
+// before escaping so the escaping does not mangle their contents.
+func formatAnswerDescriptionSegment(segment string) string {
+	if segment == "" {
+		return ""
+	}
+	var refs []string
+	with := descURLPattern.ReplaceAllStringFunc(segment, func(u string) string {
+		u = strings.TrimRight(u, ".,;:)\"'")
+		refs = append(refs, u)
+		return fmt.Sprintf("\x01U%d\x01", len(refs)-1)
+	})
+	escaped := htmlpkg.EscapeString(with)
+	escaped = strings.ReplaceAll(escaped, "\n", "<br>")
+	for i, ref := range refs {
+		token := fmt.Sprintf("\x01U%d\x01", i)
+		esc := htmlpkg.EscapeString(ref)
+		anchor := fmt.Sprintf(`<a href="%s" target="_blank" rel="noopener">%s</a>`, esc, esc)
+		escaped = strings.Replace(escaped, token, anchor, 1)
+	}
+	return escaped
+}
+
+// splitImageMarkers strips [[IMG:<url>]] markers out of an option text and
+// returns the cleaned text plus the extracted URLs (in order, deduplicated).
+func splitImageMarkers(text string) (string, []string) {
+	if !strings.Contains(text, "[[IMG:") {
+		return strings.TrimSpace(text), nil
+	}
+	var urls []string
+	seen := map[string]struct{}{}
+	cleaned := imageMarkerPattern.ReplaceAllStringFunc(text, func(match string) string {
+		m := imageMarkerPattern.FindStringSubmatch(match)
+		if len(m) == 2 {
+			u := strings.TrimSpace(m[1])
+			if u != "" {
+				if _, ok := seen[u]; !ok {
+					seen[u] = struct{}{}
+					urls = append(urls, u)
+				}
+			}
+		}
+		return ""
+	})
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	return cleaned, urls
 }
 
 func isLikelyImageURL(input string) bool {

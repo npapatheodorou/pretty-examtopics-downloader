@@ -419,6 +419,87 @@
 
     .q-exhibit-zoom:hover { background: rgba(255,255,255,0.15); }
 
+    /* ANSWER BLOCK (HOTSPOT / DRAG-DROP image answers) */
+    .answer-block {
+      border: 1px solid rgba(120, 200, 140, 0.35);
+      background: rgba(40, 80, 50, 0.18);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin: 4px 0 8px;
+    }
+
+    .answer-block-title {
+      margin: 0 0 8px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: #9be0a8;
+    }
+
+    .answer-exhibit {
+      position: relative;
+      margin: 6px 0;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #12121e;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .answer-exhibit img { display: block; max-width: 100%; height: auto; cursor: zoom-in; }
+
+    /* Canonical answer (from /exams/.../view/ Reveal Solution) */
+    .answer-block-canonical {
+      border-color: rgba(120, 200, 140, 0.5);
+      background: rgba(40, 80, 50, 0.22);
+    }
+    .answer-letter {
+      display: inline-block;
+      font-family: monospace;
+      font-size: 18px;
+      font-weight: 700;
+      background: rgba(120, 200, 140, 0.25);
+      color: #d6ffd6;
+      padding: 3px 10px;
+      border-radius: 6px;
+      margin: 4px 0 8px;
+    }
+    .answer-description {
+      color: #d8d8e8;
+      font-size: 13px;
+      line-height: 1.55;
+      margin: 8px 0 4px;
+      white-space: normal;
+    }
+    .answer-description a { color: #a4cfff; word-break: break-all; }
+    .answer-desc-image {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 8px 0;
+      border-radius: 6px;
+      cursor: zoom-in;
+    }
+    .answer-references {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #c8c8e0;
+    }
+    .answer-references ul { margin: 4px 0 0 18px; padding: 0; }
+    .answer-references a { color: #a4cfff; word-break: break-all; }
+
+    /* Hot Area fallback (no canonical solution available) */
+    .answer-block-fallback {
+      border-color: rgba(220, 180, 80, 0.45);
+      background: rgba(80, 65, 30, 0.22);
+    }
+    .answer-block-fallback .answer-block-title { color: #f1c97a; }
+    .answer-block-note {
+      font-size: 12px;
+      color: #d8c79b;
+      margin: 0 0 8px;
+    }
+
     /* OPTIONS */
     .opts { display: flex; flex-direction: column; gap: 6px; }
 

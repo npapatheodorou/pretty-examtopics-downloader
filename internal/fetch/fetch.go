@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -29,10 +30,22 @@ var (
 	oracleVersionedPattern        = regexp.MustCompile(`(?i)^(1z\d-\d{3,4})-\d{1,2}$`)
 	oracleBaseCodePattern         = regexp.MustCompile(`(?i)^1z\d-\d{3,4}$`)
 	trailingVersionTokenPattern   = regexp.MustCompile(`(?i)^(?:\d{2}|\d{4}|v\d+|ver\d+|rev\d+)$`)
+	urlInTextPattern              = regexp.MustCompile(`https?://[^\s"'<>\]]+`)
 )
+
+// retryableStatuses are HTTP status codes that justify a retry. Anti-bot
+// rate-limiting and gateway hiccups are transient and almost always recover
+// on a second pass; they used to be silently dropped.
+var retryableStatuses = map[int]struct{}{
+	http.StatusTooManyRequests:     {}, // 429
+	http.StatusBadGateway:          {}, // 502
+	http.StatusServiceUnavailable:  {}, // 503
+	http.StatusGatewayTimeout:      {}, // 504
+}
 
 func FetchURL(url string, client http.Client) []byte {
 	backoff := constants.InitalBackoff
+	var lastStatus int
 
 	for attempt := 0; attempt <= constants.MaxRetries; attempt++ {
 		if attempt > 0 {
@@ -68,16 +81,62 @@ func FetchURL(url string, client http.Client) []byte {
 			}
 			return body
 		}
-		resp.Body.Close()
 
-		if resp.StatusCode != http.StatusServiceUnavailable {
-			debugf("request failed with status code: %d", resp.StatusCode)
-			return nil
+		lastStatus = resp.StatusCode
+		if _, retryable := retryableStatuses[resp.StatusCode]; retryable {
+			// Honour Retry-After when the server provides one (common on 429).
+			if delay := parseRetryAfter(resp.Header.Get("Retry-After")); delay > 0 {
+				resp.Body.Close()
+				debugf("status %d; honouring Retry-After=%v for %s", resp.StatusCode, delay, url)
+				utils.Sleep(delay)
+				continue
+			}
+			resp.Body.Close()
+			continue
 		}
+
+		resp.Body.Close()
+		debugf("request failed with non-retryable status code: %d for %s", resp.StatusCode, url)
+		fmt.Fprintf(os.Stderr, "[WARN] HTTP %d for %s (not retried)\n", resp.StatusCode, url)
+		return nil
 	}
 
+	if lastStatus != 0 {
+		fmt.Fprintf(os.Stderr, "[WARN] Gave up after %d retries (last status %d) for %s\n", constants.MaxRetries, lastStatus, url)
+	} else {
+		fmt.Fprintf(os.Stderr, "[WARN] Gave up after %d retries (transport errors) for %s\n", constants.MaxRetries, url)
+	}
 	debugf("exhausted retries for URL: %s", url)
 	return nil
+}
+
+// parseRetryAfter accepts either a delay in seconds or an HTTP date and
+// returns the duration to wait. Returns 0 when unparseable.
+func parseRetryAfter(header string) time.Duration {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(header); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		if secs > 60 {
+			secs = 60 // cap to keep the loop responsive
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(header); err == nil {
+		d := time.Until(t)
+		if d <= 0 {
+			return 0
+		}
+		if d > 60*time.Second {
+			d = 60 * time.Second
+		}
+		return d
+	}
+	return 0
 }
 
 func ParseHTML(url string, client http.Client) (*goquery.Document, error) {
