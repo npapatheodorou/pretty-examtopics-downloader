@@ -45,8 +45,10 @@ func main() {
 
 func run() error {
 	debug := flag.Bool("debug", false, "Enable debug logs")
+	noCache := flag.Bool("no-cache", false, "Bypass the on-disk question-page cache (always fetch fresh)")
 	flag.Parse()
 	fetch.SetDebug(*debug)
+	fetch.SetCacheEnabled(!*noCache)
 
 	printBanner()
 

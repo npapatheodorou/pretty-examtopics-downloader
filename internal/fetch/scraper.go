@@ -20,7 +20,7 @@ import (
 )
 
 func getDataFromLink(link string, solutions map[string]*models.AnswerSolution) *models.QuestionData {
-	doc, err := ParseHTML(link, *client)
+	doc, err := ParseHTMLCached(link, *client)
 	if err != nil {
 		debugf("failed parsing HTML data from link: %v", err)
 		return nil
@@ -331,9 +331,10 @@ func firstURLFromSrcset(srcset string) string {
 	return parts[0]
 }
 
+var commentAnswerLetterPattern = regexp.MustCompile(`\b([A-F])\b`)
+
 func extractDiscussionComments(doc *goquery.Document) []models.CommentData {
 	var comments []models.CommentData
-	answerLetterPattern := regexp.MustCompile(`\b([A-F])\b`)
 
 	doc.Find(".discussion-container .comment-container").Each(func(i int, s *goquery.Selection) {
 		user := strings.TrimSpace(s.Find(".comment-username").First().Text())
@@ -346,7 +347,7 @@ func extractDiscussionComments(doc *goquery.Document) []models.CommentData {
 		if answerText == "" {
 			answerText = strings.TrimSpace(s.Find(".comment-selected-answers").First().Text())
 		}
-		if m := answerLetterPattern.FindStringSubmatch(strings.ToUpper(answerText)); len(m) == 2 {
+		if m := commentAnswerLetterPattern.FindStringSubmatch(strings.ToUpper(answerText)); len(m) == 2 {
 			answer = m[1]
 		}
 
@@ -391,9 +392,6 @@ func fetchAllPageLinksConcurrently(providerName, selectedExam string, numPages, 
 	sem := make(chan struct{}, concurrency)
 	results := make(chan []string, numPages)
 
-	rateLimiter := utils.CreateRateLimiter(constants.RequestsPerSecond)
-	defer rateLimiter.Stop()
-
 	for i := 1; i <= numPages; i++ {
 		wg.Add(1)
 		go func(i int) {
@@ -401,7 +399,7 @@ func fetchAllPageLinksConcurrently(providerName, selectedExam string, numPages, 
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			<-rateLimiter.C
+			requestLimiter.Wait()
 
 			url := fmt.Sprintf("https://www.examtopics.com/discussions/%s/%d", providerName, i)
 			results <- getLinksFromPage(providerName, url, selectedExam)
@@ -465,9 +463,6 @@ func GetAllPages(providerName string, selectedExam string) []models.QuestionData
 	sem := make(chan struct{}, constants.MaxConcurrentRequests)
 	results := make([]*models.QuestionData, len(sortedLinks))
 
-	rateLimiter := utils.CreateRateLimiter(constants.RequestsPerSecond)
-	defer rateLimiter.Stop()
-
 	for i, link := range sortedLinks {
 		wg.Add(1)
 		url := utils.AddToBaseUrl(link)
@@ -477,7 +472,11 @@ func GetAllPages(providerName string, selectedExam string) []models.QuestionData
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			<-rateLimiter.C
+			// Only spend the rate budget when we'll actually hit the network;
+			// cache hits return instantly and shouldn't be paced.
+			if !isPageCached(url) {
+				requestLimiter.Wait()
+			}
 
 			data := getDataFromLink(url, solutions)
 			if data != nil {

@@ -224,6 +224,12 @@ This fork includes several enhancements over the original [examtopics-downloader
 
 ---
 
+## Architecture
+
+![Architecture diagram](architecture.svg)
+
+---
+
 ## Technical Details
 
 ### Requirements

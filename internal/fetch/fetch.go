@@ -21,6 +21,17 @@ import (
 
 var client = utils.NewHTTPClient()
 
+// requestLimiter paces the concurrent fan-out phases and adapts to the server:
+// it speeds up while responses are healthy and brakes hard on throttling. Wired
+// for feedback inside FetchURL (the single place that sees status codes).
+var requestLimiter = utils.NewAdaptiveLimiter(
+	constants.StartRequestsPerSecond,
+	constants.MinRequestsPerSecond,
+	constants.MaxRequestsPerSecond,
+	constants.RateIncreaseStep,
+	constants.SuccessStreakForSpeedup,
+)
+
 var (
 	providerHrefPattern           = regexp.MustCompile(`(?i)^/exams/([a-z0-9-]+)/?$`)
 	discussionProviderHrefPattern = regexp.MustCompile(`(?i)^/discussions/([a-z0-9-]+)/?$`)
@@ -79,11 +90,14 @@ func FetchURL(url string, client http.Client) []byte {
 				debugf("failed to read response body: %v", err)
 				return nil
 			}
+			requestLimiter.OnSuccess()
 			return body
 		}
 
 		lastStatus = resp.StatusCode
 		if _, retryable := retryableStatuses[resp.StatusCode]; retryable {
+			// Server is pushing back — slow the whole fan-out, not just this call.
+			requestLimiter.OnThrottle()
 			// Honour Retry-After when the server provides one (common on 429).
 			if delay := parseRetryAfter(resp.Header.Get("Retry-After")); delay > 0 {
 				resp.Body.Close()
@@ -150,6 +164,33 @@ func ParseHTML(url string, client http.Client) (*goquery.Document, error) {
 		return nil, fmt.Errorf("failed to parse HTML from URL %q: %w", url, err)
 	}
 
+	return doc, nil
+}
+
+// ParseHTMLCached behaves like ParseHTML but serves and stores the raw response
+// body in the on-disk question-page cache. Re-running the same exam then skips
+// the network (and rate limiting) for unchanged question pages. A corrupt or
+// unparseable cache entry transparently falls back to a fresh fetch.
+func ParseHTMLCached(url string, client http.Client) (*goquery.Document, error) {
+	if body, ok := readCachedPage(url); ok {
+		if doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body)); err == nil {
+			debugf("page-cache: hit for %s", url)
+			return doc, nil
+		} else {
+			debugf("page-cache: corrupt entry for %s, refetching: %v", url, err)
+		}
+	}
+
+	body := FetchURL(url, client)
+	if body == nil {
+		return nil, fmt.Errorf("empty response body from URL %q", url)
+	}
+	writeCachedPage(url, body)
+
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML from URL %q: %w", url, err)
+	}
 	return doc, nil
 }
 
