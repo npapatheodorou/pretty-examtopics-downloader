@@ -37,7 +37,7 @@ var (
 	badgePattern       = regexp.MustCompile(`(?is)(<span class="badge">).*?(</span>)`)
 	questionsListOpen  = regexp.MustCompile(`(?is)<div[^>]*class="[^"]*\bquestions-list\b[^"]*"[^>]*>`)
 
-	discussionLinkPattern = regexp.MustCompile(`(?i)/discussions/([^/]+)/view/[^/]*-exam-([a-z0-9-]+)-topic-`)
+	discussionLinkPattern = regexp.MustCompile(`(?i)/discussions/([^/]+)/view/[^/]*-exam-([a-z0-9_-]+)-topic-`)
 	providerOnlyPattern   = regexp.MustCompile(`(?i)/discussions/([^/]+)/`)
 	titleExamPattern      = regexp.MustCompile(`(?i)\bexam\s+(.+?)\s+topic\b`)
 

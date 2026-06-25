@@ -151,6 +151,11 @@ func TestExtractExamSlugFromDiscussionURL(t *testing.T) {
 			want: "aws-certified-solutions-architect-professional-sap-c02",
 		},
 		{
+			// Fortinet discussion slugs use underscores and a compressed version.
+			url:  "/discussions/fortinet/view/405251-exam-nse6_ots_ar-76-topic-1-question-4-discussion/",
+			want: "nse6_ots_ar-76",
+		},
+		{
 			url:  "/discussions/something/view/100-topic-1-question-2-discussion/",
 			want: "",
 		},
@@ -243,6 +248,48 @@ func TestMatchesExamSelectionUsesNormalizedVariants(t *testing.T) {
 		got := matchesExamSelection(tc.provider, tc.selected, tc.link)
 		if got != tc.want {
 			t.Fatalf("matchesExamSelection(%q, %q, %q): want %v, got %v", tc.provider, tc.selected, tc.link, tc.want, got)
+		}
+	}
+}
+
+func TestMatchesExamSelectionCanonicalSlugFormats(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		selected string
+		link     string
+		want     bool
+	}{
+		{
+			// The reported case: official slug nse6-ots-ar-7-6 vs the
+			// underscored, version-compressed discussion slug nse6_ots_ar-76.
+			name:     "fortinet underscore + compressed version matches",
+			provider: "fortinet",
+			selected: "nse6-ots-ar-7-6",
+			link:     "/discussions/fortinet/view/405251-exam-nse6_ots_ar-76-topic-1-question-4-discussion/",
+			want:     true,
+		},
+		{
+			name:     "fortinet different exam does not match",
+			provider: "fortinet",
+			selected: "nse6-ots-ar-7-6",
+			link:     "/discussions/fortinet/view/87071-exam-nse6_fac-61-topic-1-question-29-discussion/",
+			want:     false,
+		},
+		{
+			name:     "different version stays distinct",
+			provider: "fortinet",
+			selected: "nse6-ots-ar-7-7",
+			link:     "/discussions/fortinet/view/405251-exam-nse6_ots_ar-76-topic-1-question-4-discussion/",
+			want:     false,
+		},
+	}
+
+	for _, tc := range tests {
+		got := matchesExamSelection(tc.provider, tc.selected, tc.link)
+		if got != tc.want {
+			t.Fatalf("%s: matchesExamSelection(%q, %q, %q): want %v, got %v",
+				tc.name, tc.provider, tc.selected, tc.link, tc.want, got)
 		}
 	}
 }

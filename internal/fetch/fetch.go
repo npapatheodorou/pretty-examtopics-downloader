@@ -36,8 +36,9 @@ var (
 	providerHrefPattern           = regexp.MustCompile(`(?i)^/exams/([a-z0-9-]+)/?$`)
 	discussionProviderHrefPattern = regexp.MustCompile(`(?i)^/discussions/([a-z0-9-]+)/?$`)
 	discussionViewLinkPattern     = regexp.MustCompile(`(?i)^/discussions/[a-z0-9-]+/view/`)
-	examFromDiscussionURLPattern  = regexp.MustCompile(`(?i)-exam-([a-z0-9-]+?)(?:-topic-|-question-|/|$)`)
+	examFromDiscussionURLPattern  = regexp.MustCompile(`(?i)-exam-([a-z0-9_-]+?)(?:-topic-|-question-|/|$)`)
 	digitsPattern                 = regexp.MustCompile(`\D+`)
+	nonAlnumPattern               = regexp.MustCompile(`[^a-z0-9]`)
 	oracleVersionedPattern        = regexp.MustCompile(`(?i)^(1z\d-\d{3,4})-\d{1,2}$`)
 	oracleBaseCodePattern         = regexp.MustCompile(`(?i)^1z\d-\d{3,4}$`)
 	trailingVersionTokenPattern   = regexp.MustCompile(`(?i)^(?:\d{2}|\d{4}|v\d+|ver\d+|rev\d+)$`)
@@ -639,6 +640,16 @@ func extractExamSlugFromDiscussionURL(link string) string {
 	return slug
 }
 
+// canonicalExamKey lowercases and strips every non-alphanumeric character so
+// exam slugs that differ only in separators or version punctuation compare
+// equal. ExamTopics uses different slug formats in different URL spaces — e.g.
+// the official exam page /exams/fortinet/nse6-ots-ar-7-6/ versus the discussion
+// URL .../-exam-nse6_ots_ar-76-topic-... — and both reduce to "nse6otsar76".
+// Digits are preserved, so distinct versions (…-7-6 vs …-7-7) stay distinct.
+func canonicalExamKey(s string) string {
+	return nonAlnumPattern.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "")
+}
+
 func getDiscussionLinksFromPage(url string) []string {
 	links, _ := getDiscussionLinksFromPageWithStatus(url)
 	return links
@@ -726,16 +737,27 @@ func matchesExamSelection(providerName, selectedExam, link string) bool {
 		return true
 	}
 	selectedNormalized := normalizeExamSlug(providerName, selectedExam)
+	selectedCanonical := canonicalExamKey(selectedExam)
 
 	link = strings.TrimSpace(strings.ToLower(link))
 	if link == "" {
 		return false
 	}
 
-	// Primary strategy: normalize the exam slug extracted from the discussion link
-	// and compare with the normalized user selection.
+	// Primary strategy: compare the exam slug extracted from the discussion link
+	// against the user selection. Try the normalized comparison first (preserves
+	// vendor variant grouping, e.g. Oracle), then a separator-insensitive
+	// canonical comparison so format differences between the official exam slug
+	// and the discussion slug (Fortinet's nse6-ots-ar-7-6 vs nse6_ots_ar-76)
+	// still match.
 	if linkExamSlug := extractExamSlugFromDiscussionURL(link); linkExamSlug != "" {
-		return normalizeExamSlug(providerName, linkExamSlug) == selectedNormalized
+		if normalizeExamSlug(providerName, linkExamSlug) == selectedNormalized {
+			return true
+		}
+		if selectedCanonical != "" && canonicalExamKey(linkExamSlug) == selectedCanonical {
+			return true
+		}
+		return false
 	}
 
 	// Oracle fallback: match variant-like URLs even when the "exam-..." segment
