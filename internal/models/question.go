@@ -1,9 +1,14 @@
 package models
 
+import "time"
+
 type CommentData struct {
 	User   string
 	Answer string
 	Text   string
+	// Date is parsed from the .comment-date title attribute on the discussion
+	// page. Zero when the timestamp is missing or unparseable.
+	Date time.Time
 }
 
 // AnswerSolution holds the canonical "Reveal Solution" answer payload scraped

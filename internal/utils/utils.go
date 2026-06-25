@@ -280,3 +280,41 @@ func TimeSince(startTime time.Time) string {
 	}
 	return fmt.Sprintf("%ds", seconds)
 }
+
+// LatestCommentTime returns the most recent non-zero comment Date on the
+// question, or the zero time.Time when none of its comments carry a parseable
+// timestamp.
+func LatestCommentTime(q models.QuestionData) time.Time {
+	var latest time.Time
+	for _, c := range q.Comments {
+		if c.Date.IsZero() {
+			continue
+		}
+		if c.Date.After(latest) {
+			latest = c.Date
+		}
+	}
+	return latest
+}
+
+// FilterByRecentComments keeps only questions whose latest comment falls within
+// the last `days` days relative to `now`. A question is dropped only when it has
+// a datable comment that is older than the cutoff; questions with no parseable
+// comment date are kept (we never remove a question merely for lacking dated
+// discussion). When days <= 0 the input is returned unchanged. Original order is
+// preserved. `now` is injected so the function stays pure and testable.
+func FilterByRecentComments(questions []models.QuestionData, days int, now time.Time) []models.QuestionData {
+	if days <= 0 {
+		return questions
+	}
+	cutoff := now.AddDate(0, 0, -days)
+	kept := make([]models.QuestionData, 0, len(questions))
+	for _, q := range questions {
+		latest := LatestCommentTime(q)
+		if !latest.IsZero() && latest.Before(cutoff) {
+			continue
+		}
+		kept = append(kept, q)
+	}
+	return kept
+}

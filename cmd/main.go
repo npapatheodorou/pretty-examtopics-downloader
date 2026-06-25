@@ -46,9 +46,19 @@ func main() {
 func run() error {
 	debug := flag.Bool("debug", false, "Enable debug logs")
 	noCache := flag.Bool("no-cache", false, "Bypass the on-disk question-page cache (always fetch fresh)")
+	recentDays := flag.Int("recent-comments-days", 0, "Keep only questions with a comment in the last N days (0 = ask interactively / disabled)")
 	flag.Parse()
 	fetch.SetDebug(*debug)
 	fetch.SetCacheEnabled(!*noCache)
+
+	// Distinguish "flag explicitly passed" from "left at default 0" so we only
+	// fall back to the interactive prompt when the user didn't specify a window.
+	recentDaysSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "recent-comments-days" {
+			recentDaysSet = true
+		}
+	})
 
 	printBanner()
 
@@ -97,10 +107,29 @@ func run() error {
 		extractionFilter = ""
 	}
 
+	// Resolve the recent-comment window: an explicit flag wins; otherwise ask.
+	recentWindowDays := *recentDays
+	if !recentDaysSet {
+		recentWindowDays, err = promptRecentCommentsDays(reader)
+		if err != nil {
+			return fmt.Errorf("failed reading recent-comments window: %w", err)
+		}
+	}
+
 	printInfof("Starting extraction for %s / %s...\n", formatProviderName(selectedProvider), selectedExam)
 	links := fetch.GetAllPages(selectedProvider, extractionFilter)
 	if len(links) == 0 {
 		return fmt.Errorf("no matching questions were extracted")
+	}
+
+	if recentWindowDays > 0 {
+		before := len(links)
+		links = utils.FilterByRecentComments(links, recentWindowDays, time.Now())
+		printInfof("Recent-comment filter (last %d days): kept %d, dropped %d of %d question(s).\n",
+			recentWindowDays, len(links), before-len(links), before)
+		if len(links) == 0 {
+			return fmt.Errorf("no questions had a comment within the last %d days; rerun with a larger --recent-comments-days value or 0 to disable", recentWindowDays)
+		}
 	}
 
 	outputPath := defaultOutputPath(selectedProvider, selectedExam)
@@ -241,6 +270,33 @@ func promptYesNo(reader *bufio.Reader, prompt string, defaultYes bool) (bool, er
 		default:
 			printWarnf("Please answer y or n.\n")
 		}
+	}
+}
+
+// promptRecentCommentsDays asks for an optional "recent comment activity"
+// window in days. Blank input means "keep all" (returns 0). Re-prompts on
+// non-numeric or negative input.
+func promptRecentCommentsDays(reader *bufio.Reader) (int, error) {
+	prompt := "Keep only questions with a comment in the last N days? (e.g. 180 = ~6 months, 365 = ~12 months; blank = keep all): "
+	for {
+		fmt.Print(style(prompt, ansiBold+ansiCyan))
+
+		raw, err := reader.ReadString('\n')
+		if err != nil {
+			return 0, err
+		}
+
+		answer := strings.TrimSpace(raw)
+		if answer == "" {
+			return 0, nil
+		}
+
+		days, err := strconv.Atoi(answer)
+		if err != nil || days < 0 {
+			printWarnf("Please enter a positive number of days, or leave blank to keep all.\n")
+			continue
+		}
+		return days, nil
 	}
 }
 

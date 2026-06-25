@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"examtopics-downloader/internal/constants"
 	"examtopics-downloader/internal/models"
@@ -407,6 +408,31 @@ func extractMostVotedAnswer(doc *goquery.Document) string {
 
 var commentAnswerLetterPattern = regexp.MustCompile(`\b([A-F])\b`)
 
+// commentDateLayout matches the absolute timestamp ExamTopics stores in the
+// title attribute of .comment-date, e.g. "Tue 27 Jun 2023 10:27". The visible
+// text is a relative string ("2 years ago") and is intentionally not parsed.
+const commentDateLayout = "Mon 02 Jan 2006 15:04"
+
+// parseCommentDate reads the .comment-date title attribute from a comment
+// element and parses it. Returns the zero time.Time when the attribute is
+// absent, blank, or unparseable.
+func parseCommentDate(s *goquery.Selection) time.Time {
+	title, ok := s.Find(".comment-date").First().Attr("title")
+	if !ok {
+		return time.Time{}
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(commentDateLayout, title)
+	if err != nil {
+		debugf("comment-date: unparseable title %q: %v", title, err)
+		return time.Time{}
+	}
+	return t
+}
+
 func extractDiscussionComments(doc *goquery.Document) []models.CommentData {
 	var comments []models.CommentData
 
@@ -434,6 +460,7 @@ func extractDiscussionComments(doc *goquery.Document) []models.CommentData {
 			User:   user,
 			Answer: answer,
 			Text:   content,
+			Date:   parseCommentDate(s),
 		})
 	})
 
