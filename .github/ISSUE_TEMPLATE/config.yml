@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: README & troubleshooting
+    url: https://github.com/npapatheodorou/pretty-examtopics-downloader#readme
+    about: Check the README first — it covers usage, flags, and common gotchas (rebuild, clear cache, -no-cache).

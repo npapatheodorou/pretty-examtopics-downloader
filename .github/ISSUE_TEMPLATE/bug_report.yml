@@ -1,0 +1,119 @@
+name: Bug report
+description: Report something that doesn't work (failed extraction, wrong/missing answers, missing questions, crashes).
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please fill in as much as you can —
+        the **provider, exam slug, exact command, and console output** are what make
+        a report actionable.
+
+        Before submitting, please confirm the checklist below.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I'm running a build from the latest `main` (rebuilt with `go build ./cmd`), not an old binary.
+          required: true
+        - label: I searched [existing issues](../issues?q=is%3Aissue) and didn't find a duplicate.
+          required: true
+        - label: I tried again with `-no-cache` (and/or cleared the page cache) to rule out a stale cached page.
+          required: false
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: What kind of problem is it?
+      options:
+        - "Extraction failed / no questions found"
+        - "Missing questions (fewer than the source exam)"
+        - "Wrong or missing answers"
+        - "Broken/missing images or formatting in the HTML"
+        - "Crash / panic / error message"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      description: As selected in the menu (e.g. `cisco`, `fortinet`, `microsoft`).
+      placeholder: fortinet
+    validations:
+      required: true
+
+  - type: input
+    id: exam
+    attributes:
+      label: Exam slug
+      description: The exam you selected (e.g. `nse6-ots-ar-7-6`, `200-301`). Copy it exactly.
+      placeholder: nse6-ots-ar-7-6
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command / flags used
+      description: How you launched it, including any flags (`-debug`, `-no-cache`, `-recent-comments-days`).
+      placeholder: examtopics-downloader.exe -no-cache -recent-comments-days 365
+    validations:
+      required: false
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem. For wrong/missing answers, include the question number and what you expected vs. what was produced.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: false
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Paste the relevant terminal output. Re-running with `-debug` and including those logs helps a lot. This is automatically formatted as code.
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `git rev-parse --short HEAD`, a release tag, or the date you built it.
+      placeholder: d3743a6
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: For wrong-answer or formatting issues, a screenshot of the generated HTML next to the ExamTopics page is very helpful. Drag images here.
+    validations:
+      required: false
