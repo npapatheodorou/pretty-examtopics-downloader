@@ -232,7 +232,7 @@ func TestProviderDiscussionIndexCachesCompletedEmptyScan(t *testing.T) {
 		switch r.URL.Path {
 		case "/discussions/acme/":
 			fmt.Fprint(w, `<div class="discussion-list-page-indicator"><strong>1</strong><strong>1</strong></div>`)
-		case "/discussions/acme/1":
+		case "/discussions/acme/1", "/discussions/acme/1/":
 			pageHits.Add(1)
 			fmt.Fprint(w, `<p>No discussions</p>`)
 		default:
@@ -329,7 +329,7 @@ func TestExtractionReusesCompletedProviderIndex(t *testing.T) {
 		switch r.URL.Path {
 		case "/discussions/acme/":
 			fmt.Fprint(w, `<div class="discussion-list-page-indicator"><strong>1</strong><strong>1</strong></div>`)
-		case "/discussions/acme/1":
+		case "/discussions/acme/1", "/discussions/acme/1/":
 			listingHits.Add(1)
 			fmt.Fprint(w, `<a href="/discussions/acme/view/1-exam-cert-1-topic-1-question-1-discussion/">Q1</a>`)
 			fmt.Fprint(w, `<a href="/discussions/acme/view/2-exam-cert-1-topic-1-question-2-discussion/">Q2</a>`)
@@ -364,7 +364,7 @@ func TestExtractionReturnsRecoveredQuestionsWithPartialError(t *testing.T) {
 		switch r.URL.Path {
 		case "/discussions/acme/":
 			fmt.Fprint(w, `<div class="discussion-list-page-indicator"><strong>1</strong><strong>1</strong></div>`)
-		case "/discussions/acme/1":
+		case "/discussions/acme/1", "/discussions/acme/1/":
 			fmt.Fprint(w, `<a href="/discussions/acme/view/1-exam-cert-1-topic-1-question-1-discussion/">Q1</a>`)
 			fmt.Fprint(w, `<a href="/discussions/acme/view/2-exam-cert-1-topic-1-question-2-discussion/">Q2</a>`)
 		case "/discussions/acme/view/1-exam-cert-1-topic-1-question-1-discussion/":
