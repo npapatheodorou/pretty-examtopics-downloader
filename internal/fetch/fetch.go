@@ -415,7 +415,7 @@ func extractProvidersFromExamsDoc(doc *goquery.Document) []string {
 			return
 		}
 
-		href = strings.TrimSpace(strings.ToLower(href))
+		href = toRelativePath(strings.TrimSpace(strings.ToLower(href)))
 		matches := providerHrefPattern.FindStringSubmatch(href)
 		if len(matches) != 2 {
 			return
@@ -461,7 +461,7 @@ func extractProvidersFromDiscussionsDoc(doc *goquery.Document) []string {
 				return true
 			}
 
-			href = strings.TrimSpace(strings.ToLower(href))
+			href = toRelativePath(strings.TrimSpace(strings.ToLower(href)))
 			matches := discussionProviderHrefPattern.FindStringSubmatch(href)
 			if len(matches) != 2 {
 				return true
@@ -497,6 +497,7 @@ func extractProvidersFromDiscussionsDoc(doc *goquery.Document) []string {
 			}
 
 			href = strings.TrimSpace(strings.ToLower(href))
+			href = toRelativePath(href)
 			matches := discussionProviderHrefPattern.FindStringSubmatch(href)
 			if len(matches) != 2 {
 				return
@@ -571,7 +572,7 @@ func getProviderExamsContext(ctx context.Context, providerName string) ([]string
 			return
 		}
 
-		cleanHref := strings.TrimSpace(strings.ToLower(href))
+		cleanHref := toRelativePath(strings.TrimSpace(strings.ToLower(href)))
 		matches := examHrefPattern.FindStringSubmatch(cleanHref)
 		if len(matches) != 2 {
 			return
@@ -863,6 +864,38 @@ func normalizeDiscussionViewHref(rawHref string) string {
 	}
 
 	return rawHref
+}
+
+// toRelativePath converts an absolute examtopics.com URL (e.g.
+// "https://www.examtopics.com/exams/amazon/") into a path rooted at "/"
+// (e.g. "/exams/amazon/") so the relative-path provider/exam patterns match.
+// Already-relative paths are returned unchanged; external hosts are left
+// untouched (they won't match the provider/exam patterns anyway).
+func toRelativePath(href string) string {
+	href = strings.TrimSpace(href)
+	if strings.HasPrefix(href, "https://www.examtopics.com") {
+		href = strings.TrimPrefix(href, "https://www.examtopics.com")
+	} else if strings.HasPrefix(href, "http://www.examtopics.com") {
+		href = strings.TrimPrefix(href, "http://www.examtopics.com")
+	} else if strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "http://") {
+		parsed, err := url.Parse(href)
+		if err != nil {
+			return href
+		}
+		host := strings.TrimSpace(strings.ToLower(parsed.Hostname()))
+		if host != "www.examtopics.com" && host != "examtopics.com" {
+			return href
+		}
+		href = parsed.EscapedPath()
+	}
+
+	if !strings.HasPrefix(href, "/") {
+		href = "/" + href
+	}
+	if cut := strings.IndexAny(href, "?#"); cut >= 0 {
+		href = href[:cut]
+	}
+	return strings.TrimSpace(href)
 }
 
 func matchesExamSelection(providerName, selectedExam, link string) bool {

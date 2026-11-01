@@ -14,7 +14,7 @@ const DiscoveryWorkers = 8
 const DiscoveryTimeout = 2 * time.Minute
 const DiscoveryCheckpointPages = 10
 
-const MaxRetries = 3
+const MaxRetries = 8
 const MetadataMaxRetries = 1
 
 // Adaptive request pacing (AIMD). The main fan-out starts at

@@ -497,7 +497,7 @@ func normalizeCommentText(raw string) string {
 }
 
 func listingPageURL(providerName string, page int) string {
-	return fmt.Sprintf("%s/discussions/%s/%d", examTopicsBaseURL, providerName, page)
+	return fmt.Sprintf("%s/discussions/%s/%d/", examTopicsBaseURL, providerName, page)
 }
 
 func questionPageURL(link string) string {
